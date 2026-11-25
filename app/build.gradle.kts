@@ -14,7 +14,7 @@ android {
 
     defaultConfig {
         applicationId = "com.dpiguard.android"
-        minSdk = 24
+        minSdk = 29
         targetSdk = 34
         versionCode = 2
         versionName = "1.1.0"
