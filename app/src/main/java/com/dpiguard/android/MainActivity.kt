@@ -13,6 +13,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.dpiguard.android.databinding.ActivityMainBinding
 import com.dpiguard.android.model.BypassStrategy
+import com.dpiguard.android.proxy.StrategyScanner
 import com.dpiguard.android.vpn.ConnectionState
 import com.dpiguard.android.vpn.DpiVpnService
 import com.dpiguard.android.vpn.VpnStateHolder
@@ -21,6 +22,7 @@ import kotlinx.coroutines.launch
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
+    private var suppressSpinnerCallback = false
 
     private val vpnPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -74,8 +76,11 @@ class MainActivity : AppCompatActivity() {
                 position: Int,
                 id: Long
             ) {
+                if (suppressSpinnerCallback) return
                 val selected = strategies[position]
-                VpnStateHolder.setStrategy(selected)
+                if (VpnStateHolder.strategy.value != selected) {
+                    VpnStateHolder.setStrategy(selected)
+                }
                 binding.tvStrategyDesc.text = selected.description
             }
 
@@ -98,6 +103,14 @@ class MainActivity : AppCompatActivity() {
             when (VpnStateHolder.state.value) {
                 ConnectionState.DISCONNECTED -> prepareAndStartVpn()
                 ConnectionState.CONNECTED, ConnectionState.CONNECTING -> stopVpnService()
+            }
+        }
+
+        binding.btnAutoScan.setOnClickListener {
+            if (!VpnStateHolder.isScanning.value) {
+                lifecycleScope.launch {
+                    StrategyScanner.scanAndSelectBest()
+                }
             }
         }
 
@@ -153,6 +166,31 @@ class MainActivity : AppCompatActivity() {
                         binding.btnToggleVpn.text = "Отключить"
                     }
                 }
+            }
+        }
+
+        lifecycleScope.launch {
+            VpnStateHolder.strategy.collect { strategy ->
+                val idx = BypassStrategy.entries.indexOf(strategy)
+                if (idx >= 0 && binding.spinnerStrategy.selectedItemPosition != idx) {
+                    suppressSpinnerCallback = true
+                    binding.spinnerStrategy.setSelection(idx)
+                    suppressSpinnerCallback = false
+                }
+                binding.tvStrategyDesc.text = strategy.description
+            }
+        }
+
+        lifecycleScope.launch {
+            VpnStateHolder.isScanning.collect { scanning ->
+                binding.btnAutoScan.isEnabled = !scanning
+                binding.btnAutoScan.text = if (scanning) "Сканирую..." else "Автоподбор стратегии"
+            }
+        }
+
+        lifecycleScope.launch {
+            VpnStateHolder.scanStatus.collect { status ->
+                binding.tvScanStatus.text = status
             }
         }
 

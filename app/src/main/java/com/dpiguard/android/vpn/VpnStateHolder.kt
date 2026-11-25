@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicLong
 
 enum class ConnectionState {
     DISCONNECTED,
@@ -18,7 +19,7 @@ object VpnStateHolder {
     private val _state = MutableStateFlow(ConnectionState.DISCONNECTED)
     val state: StateFlow<ConnectionState> = _state.asStateFlow()
 
-    private val _strategy = MutableStateFlow(BypassStrategy.RF_TSPU_DEFAULT)
+    private val _strategy = MutableStateFlow(BypassStrategy.RF_TRIPLE_RECORD)
     val strategy: StateFlow<BypassStrategy> = _strategy.asStateFlow()
 
     private val _dnsServer = MutableStateFlow("1.1.1.1")
@@ -30,6 +31,14 @@ object VpnStateHolder {
     private val _packetsHandled = MutableStateFlow(0L)
     val packetsHandled: StateFlow<Long> = _packetsHandled.asStateFlow()
 
+    private val _isScanning = MutableStateFlow(false)
+    val isScanning: StateFlow<Boolean> = _isScanning.asStateFlow()
+
+    private val _scanStatus = MutableStateFlow("Нажми «Автоподбор», чтобы проверить провайдера")
+    val scanStatus: StateFlow<String> = _scanStatus.asStateFlow()
+
+    private val packetCounter = AtomicLong(0L)
+    private val logLock = Any()
     private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 
     fun setState(newState: ConnectionState) {
@@ -46,22 +55,34 @@ object VpnStateHolder {
         log("DNS: $dns")
     }
 
+    fun setScanning(scanning: Boolean) {
+        _isScanning.value = scanning
+    }
+
+    fun setScanStatus(status: String) {
+        _scanStatus.value = status
+    }
+
     fun incrementPackets() {
-        _packetsHandled.value += 1
+        _packetsHandled.value = packetCounter.incrementAndGet()
     }
 
     fun resetStats() {
-        _packetsHandled.value = 0
+        packetCounter.set(0L)
+        _packetsHandled.value = 0L
     }
 
     fun log(message: String) {
         val timestamp = timeFormat.format(Date())
         val entry = "[$timestamp] $message"
-        val updated = (_logs.value + entry).takeLast(80)
-        _logs.value = updated
+        synchronized(logLock) {
+            _logs.value = (_logs.value + entry).takeLast(80)
+        }
     }
 
     fun clearLogs() {
-        _logs.value = emptyList()
+        synchronized(logLock) {
+            _logs.value = emptyList()
+        }
     }
 }

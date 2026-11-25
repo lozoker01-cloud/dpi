@@ -13,10 +13,6 @@ import com.dpiguard.android.MainActivity
 import com.dpiguard.android.R
 import com.dpiguard.android.proxy.DpiBypassProxy
 import hev.htproxy.TProxyService
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import java.io.File
 
 class DpiVpnService : VpnService() {
@@ -29,7 +25,6 @@ class DpiVpnService : VpnService() {
         private const val TUN_MTU = 8500
     }
 
-    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var tunInterface: ParcelFileDescriptor? = null
     private var proxy: DpiBypassProxy? = null
 
@@ -72,7 +67,7 @@ class DpiVpnService : VpnService() {
                 return
             }
 
-            proxy = DpiBypassProxy(port = 10808, scope = serviceScope).apply { start() }
+            proxy = DpiBypassProxy(port = 10808).apply { start() }
 
             val configFile = File(cacheDir, "hev-socks5-tunnel.yml")
             val configText = buildString {
@@ -84,6 +79,9 @@ class DpiVpnService : VpnService() {
                 appendLine("  udp: 'udp'")
                 appendLine("misc:")
                 appendLine("  task-stack-size: 81920")
+                appendLine("  tcp-buffer-size: 65536")
+                appendLine("  tcp-read-write-timeout: 300000")
+                appendLine("  udp-read-write-timeout: 60000")
             }
             configFile.writeText(configText)
 
@@ -96,8 +94,8 @@ class DpiVpnService : VpnService() {
 
             VpnStateHolder.setState(ConnectionState.CONNECTED)
             VpnStateHolder.log("Туннель активен (DNS: $dns)")
-        } catch (e: Exception) {
-            VpnStateHolder.log("Ошибка запуска VPN: ${e.message}")
+        } catch (t: Throwable) {
+            VpnStateHolder.log("Ошибка запуска VPN: ${t.message}")
             stopVpn()
         }
     }
@@ -107,15 +105,18 @@ class DpiVpnService : VpnService() {
             if (TProxyService.TProxyIsRunning()) {
                 TProxyService.TProxyStopService()
             }
-        } catch (_: Exception) {
+        } catch (_: Throwable) {
         }
 
-        proxy?.stop()
+        try {
+            proxy?.stop()
+        } catch (_: Throwable) {
+        }
         proxy = null
 
         try {
             tunInterface?.close()
-        } catch (_: Exception) {
+        } catch (_: Throwable) {
         }
         tunInterface = null
 
@@ -133,7 +134,6 @@ class DpiVpnService : VpnService() {
 
     override fun onDestroy() {
         stopVpn()
-        serviceScope.cancel()
         super.onDestroy()
     }
 
