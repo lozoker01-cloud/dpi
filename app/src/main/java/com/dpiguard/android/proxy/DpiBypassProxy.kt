@@ -161,7 +161,7 @@ class DpiBypassProxy(
             val pLo = (boundPort and 0xFF).toByte()
 
             // Отвечаем локальным адресом 127.0.0.1:boundPort
-            tcpOutput.write(byteArrayOf(0x05, 0x00, 0x00, 0x01, 127, 0, 0, 1, pHi, pLo))
+            tcpOutput.write(byteArrayOf(0x05.toByte(), 0x00.toByte(), 0x00.toByte(), 0x01.toByte(), 127.toByte(), 0.toByte(), 0.toByte(), 1.toByte(), pHi, pLo))
             tcpOutput.flush()
 
             var clientUdpAddr: SocketAddress? = null
