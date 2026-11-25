@@ -1,3 +1,8 @@
+import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -42,13 +47,13 @@ android {
 val hevAar = file("libs/hev-socks5-tunnel.aar")
 if (!hevAar.exists()) {
     hevAar.parentFile.mkdirs()
-    val client = java.net.http.HttpClient.newBuilder()
-        .followRedirects(java.net.http.HttpClient.Redirect.ALWAYS)
+    val client = HttpClient.newBuilder()
+        .followRedirects(HttpClient.Redirect.ALWAYS)
         .build()
-    val request = java.net.http.HttpRequest.newBuilder()
-        .uri(java.net.URI.create("https://github.com/heiher/hev-socks5-tunnel/releases/download/2.20.0/hev-socks5-tunnel.aar"))
+    val request = HttpRequest.newBuilder()
+        .uri(URI.create("https://github.com/heiher/hev-socks5-tunnel/releases/download/2.20.0/hev-socks5-tunnel.aar"))
         .build()
-    val response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofFile(hevAar.toPath()))
+    val response = client.send(request, HttpResponse.BodyHandlers.ofFile(hevAar.toPath()))
     if (response.statusCode() !in 200..299) {
         hevAar.delete()
         throw GradleException("Failed to download hev-socks5-tunnel.aar: HTTP ${response.statusCode()}")
