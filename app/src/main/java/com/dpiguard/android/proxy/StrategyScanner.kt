@@ -4,6 +4,9 @@ import android.content.Context
 import com.dpiguard.android.model.BypassStrategy
 import com.dpiguard.android.vpn.VpnStateHolder
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -70,12 +73,12 @@ object StrategyScanner {
                 }
 
                 try {
-                    val rtts = kotlinx.coroutines.coroutineScope {
+                    val rtts = coroutineScope {
                         resolvedIps.map { (host, ip) ->
-                            kotlinx.coroutines.async {
+                            async {
                                 testHostViaSocks(host, ip, testPort)
                             }
-                        }.map { it.await() }
+                        }.awaitAll()
                     }
                     for (rtt in rtts) {
                         if (rtt != null) {
