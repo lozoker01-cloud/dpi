@@ -37,7 +37,7 @@ class ByeDpiRunner(private val context: Context) {
             val pb = ProcessBuilder(cmd)
             pb.redirectErrorStream(true)
             process = pb.start()
-            Thread.sleep(150)
+            Thread.sleep(80)
             val alive = process?.isAlive == true
             if (alive) {
                 VpnStateHolder.log("ByeDPI запущен на 127.0.0.1:$port")

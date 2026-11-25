@@ -19,7 +19,7 @@ object VpnStateHolder {
     private val _state = MutableStateFlow(ConnectionState.DISCONNECTED)
     val state: StateFlow<ConnectionState> = _state.asStateFlow()
 
-    private val _strategy = MutableStateFlow(BypassStrategy.RF_DISORDER_OOB)
+    private val _strategy = MutableStateFlow(BypassStrategy.S01_FAKE_TTL8_TLSREC)
     val strategy: StateFlow<BypassStrategy> = _strategy.asStateFlow()
 
     private val _dnsServer = MutableStateFlow("1.1.1.1")

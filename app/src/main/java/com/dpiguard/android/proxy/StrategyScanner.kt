@@ -70,8 +70,14 @@ object StrategyScanner {
                 }
 
                 try {
-                    for ((host, ip) in resolvedIps) {
-                        val rtt = testHostViaSocks(host, ip, testPort)
+                    val rtts = kotlinx.coroutines.coroutineScope {
+                        resolvedIps.map { (host, ip) ->
+                            kotlinx.coroutines.async {
+                                testHostViaSocks(host, ip, testPort)
+                            }
+                        }.map { it.await() }
+                    }
+                    for (rtt in rtts) {
                         if (rtt != null) {
                             passed++
                             totalTime += rtt
@@ -145,15 +151,15 @@ object StrategyScanner {
             val start = System.currentTimeMillis()
             val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", socksPort))
             socksSocket = Socket(proxy)
-            socksSocket.soTimeout = 4000
-            socksSocket.connect(InetSocketAddress(ip, 443), 4000)
+            socksSocket.soTimeout = 2500
+            socksSocket.connect(InetSocketAddress(ip, 443), 2500)
 
             val factory = SSLSocketFactory.getDefault() as SSLSocketFactory
             sslSocket = factory.createSocket(socksSocket, host, 443, true) as SSLSocket
             val params = sslSocket.sslParameters
             params.serverNames = listOf(SNIHostName(host))
             sslSocket.sslParameters = params
-            sslSocket.soTimeout = 4000
+            sslSocket.soTimeout = 2500
             sslSocket.startHandshake()
 
             System.currentTimeMillis() - start
