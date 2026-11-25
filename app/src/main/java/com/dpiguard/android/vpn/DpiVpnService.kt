@@ -75,24 +75,17 @@ class DpiVpnService : VpnService() {
             proxy = DpiBypassProxy(port = 10808, scope = serviceScope).apply { start() }
 
             val configFile = File(cacheDir, "hev-socks5-tunnel.yml")
-            configFile.writeText(
-                "tunnel:
-" +
-                    "  mtu: $TUN_MTU
-" +
-                    "socks5:
-" +
-                    "  port: 10808
-" +
-                    "  address: 127.0.0.1
-" +
-                    "  udp: 'udp'
-" +
-                    "misc:
-" +
-                    "  task-stack-size: 81920
-"
-            )
+            val configText = buildString {
+                appendLine("tunnel:")
+                appendLine("  mtu: $TUN_MTU")
+                appendLine("socks5:")
+                appendLine("  port: 10808")
+                appendLine("  address: 127.0.0.1")
+                appendLine("  udp: 'udp'")
+                appendLine("misc:")
+                appendLine("  task-stack-size: 81920")
+            }
+            configFile.writeText(configText)
 
             val started = TProxyService.TProxyStartService(configFile.absolutePath, pfd.fd)
             if (!started) {

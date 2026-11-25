@@ -39,8 +39,24 @@ android {
     }
 }
 
+val hevAar = file("libs/hev-socks5-tunnel.aar")
+if (!hevAar.exists()) {
+    hevAar.parentFile.mkdirs()
+    val client = java.net.http.HttpClient.newBuilder()
+        .followRedirects(java.net.http.HttpClient.Redirect.ALWAYS)
+        .build()
+    val request = java.net.http.HttpRequest.newBuilder()
+        .uri(java.net.URI.create("https://github.com/heiher/hev-socks5-tunnel/releases/download/2.20.0/hev-socks5-tunnel.aar"))
+        .build()
+    val response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofFile(hevAar.toPath()))
+    if (response.statusCode() !in 200..299) {
+        hevAar.delete()
+        throw GradleException("Failed to download hev-socks5-tunnel.aar: HTTP ${response.statusCode()}")
+    }
+}
+
 dependencies {
-    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar", "*.jar"))))
+    implementation(files("libs/hev-socks5-tunnel.aar"))
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("com.google.android.material:material:1.12.0")
