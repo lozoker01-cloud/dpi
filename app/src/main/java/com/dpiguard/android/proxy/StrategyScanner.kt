@@ -167,11 +167,7 @@ object StrategyScanner {
 
             // Отправляем лёгкий HTTP GET, чтобы проверить, не режет ли ТСПУ передачу данных после TLS
             val out = sslSocket.outputStream
-            out.write("GET /generate_204 HTTP/1.1
-Host: $host
-Connection: close
-
-".toByteArray())
+            out.write("GET /generate_204 HTTP/1.1\r\nHost: $host\r\nConnection: close\r\n\r\n".toByteArray())
             out.flush()
             val firstRespByte = sslSocket.inputStream.read()
             if (firstRespByte == -1) return null
