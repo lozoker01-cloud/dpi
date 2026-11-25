@@ -9,6 +9,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.DatagramPacket
@@ -21,10 +22,13 @@ import java.net.SocketAddress
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * Резервный локальный SOCKS5-прокси на Kotlin (используется, если нативный libbyedpi.so недоступен).
+ * Локальный SOCKS5-прокси на 127.0.0.1:10808.
+ * - UDP ASSOCIATE: пропускает DNS (UDP/53) и БЛОКИРУЕТ QUIC (UDP/443), заставляя YouTube идти по TCP.
+ * - TCP CONNECT: передаёт в нативный ByeDPI (127.0.0.1:upstreamSocksPort) или применяет Kotlin-сплит.
  */
 class DpiBypassProxy(
-    private val port: Int = 10808
+    private val port: Int = 10808,
+    private val upstreamSocksPort: Int? = null
 ) {
     private val exceptionHandler = CoroutineExceptionHandler { _, _ -> }
     private val proxyScope = CoroutineScope(SupervisorJob() + Dispatchers.IO + exceptionHandler)
@@ -36,7 +40,7 @@ class DpiBypassProxy(
         acceptJob = proxyScope.launch {
             try {
                 serverSocket = ServerSocket(port, 256, InetAddress.getByName("127.0.0.1"))
-                VpnStateHolder.log("Kotlin-прокси запущен: 127.0.0.1:$port")
+                VpnStateHolder.log("Прокси-шлюз запущен: 127.0.0.1:$port (QUIC блок: ВКЛ)")
 
                 while (isActive) {
                     val client = serverSocket?.accept() ?: break
@@ -84,23 +88,26 @@ class DpiBypassProxy(
             val cmd = header[1].toInt() and 0xFF
             val atyp = header[3].toInt() and 0xFF
 
-            val targetHost: String = when (atyp) {
+            val rawAddrBytes: ByteArray
+            val targetHost: String
+            when (atyp) {
                 0x01 -> {
-                    val addr = ByteArray(4)
-                    if (!readFully(input, addr)) return
-                    InetAddress.getByAddress(addr).hostAddress ?: return
+                    rawAddrBytes = ByteArray(4)
+                    if (!readFully(input, rawAddrBytes)) return
+                    targetHost = InetAddress.getByAddress(rawAddrBytes).hostAddress ?: return
                 }
                 0x03 -> {
                     val len = input.read()
                     if (len <= 0) return
                     val domain = ByteArray(len)
                     if (!readFully(input, domain)) return
-                    String(domain, Charsets.UTF_8)
+                    rawAddrBytes = byteArrayOf(len.toByte()) + domain
+                    targetHost = String(domain, Charsets.UTF_8)
                 }
                 0x04 -> {
-                    val addr = ByteArray(16)
-                    if (!readFully(input, addr)) return
-                    InetAddress.getByAddress(addr).hostAddress ?: return
+                    rawAddrBytes = ByteArray(16)
+                    if (!readFully(input, rawAddrBytes)) return
+                    targetHost = InetAddress.getByAddress(rawAddrBytes).hostAddress ?: return
                 }
                 else -> return
             }
@@ -110,7 +117,7 @@ class DpiBypassProxy(
             val targetPort = ((portBytes[0].toInt() and 0xFF) shl 8) or (portBytes[1].toInt() and 0xFF)
 
             when (cmd) {
-                0x01 -> handleTcpConnect(input, output, targetHost, targetPort)
+                0x01 -> handleTcpConnect(input, output, atyp, rawAddrBytes, portBytes, targetHost, targetPort)
                 0x03 -> handleUdpAssociate(input, output)
                 else -> {
                     output.write(byteArrayOf(0x05, 0x07, 0x00, 0x01, 0, 0, 0, 0, 0, 0))
@@ -123,9 +130,18 @@ class DpiBypassProxy(
     private suspend fun handleTcpConnect(
         input: InputStream,
         output: OutputStream,
+        atyp: Int,
+        rawAddrBytes: ByteArray,
+        portBytes: ByteArray,
         targetHost: String,
         targetPort: Int
     ) {
+        val upPort = upstreamSocksPort
+        if (upPort != null) {
+            handleTcpViaUpstreamByeDpi(input, output, atyp, rawAddrBytes, portBytes, upPort)
+            return
+        }
+
         val remote = Socket()
         try {
             remote.tcpNoDelay = true
@@ -138,7 +154,7 @@ class DpiBypassProxy(
             output.flush()
 
             VpnStateHolder.incrementPackets()
-            relayWithDpiBypass(input, output, remote)
+            relayWithDpiBypass(input, output, remote, applyKotlinSplit = true)
         } catch (_: Exception) {
             try {
                 output.write(byteArrayOf(0x05, 0x05, 0x00, 0x01, 0, 0, 0, 0, 0, 0))
@@ -146,6 +162,81 @@ class DpiBypassProxy(
             } catch (_: Exception) {}
         } finally {
             try { remote.close() } catch (_: Exception) {}
+        }
+    }
+
+    private suspend fun handleTcpViaUpstreamByeDpi(
+        clientIn: InputStream,
+        clientOut: OutputStream,
+        atyp: Int,
+        rawAddrBytes: ByteArray,
+        portBytes: ByteArray,
+        upPort: Int
+    ) {
+        val upstream = Socket()
+        try {
+            upstream.tcpNoDelay = true
+            upstream.receiveBufferSize = 65536
+            upstream.sendBufferSize = 65536
+            upstream.soTimeout = 120000
+            upstream.connect(InetSocketAddress("127.0.0.1", upPort), 5000)
+
+            val upIn = upstream.getInputStream()
+            val upOut = upstream.getOutputStream()
+
+            // SOCKS5 handshake с нативным ByeDPI
+            upOut.write(byteArrayOf(0x05, 0x01, 0x00))
+            upOut.flush()
+            val authResp = ByteArray(2)
+            if (!readFully(upIn, authResp) || authResp[1] != 0x00.toByte()) {
+                clientOut.write(byteArrayOf(0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0))
+                clientOut.flush()
+                return
+            }
+
+            // Отправляем CONNECT
+            val req = ByteArrayOutputStream()
+            req.write(byteArrayOf(0x05, 0x01, 0x00, atyp.toByte()))
+            req.write(rawAddrBytes)
+            req.write(portBytes)
+            upOut.write(req.toByteArray())
+            upOut.flush()
+
+            // Читаем ответ от ByeDPI и передаём клиенту
+            val repHead = ByteArray(4)
+            if (!readFully(upIn, repHead)) return
+            val repAtyp = repHead[3].toInt() and 0xFF
+            val repAddr = when (repAtyp) {
+                0x01 -> ByteArray(4).also { if (!readFully(upIn, it)) return }
+                0x03 -> {
+                    val l = upIn.read()
+                    if (l <= 0) return
+                    byteArrayOf(l.toByte()) + ByteArray(l).also { if (!readFully(upIn, it)) return }
+                }
+                0x04 -> ByteArray(16).also { if (!readFully(upIn, it)) return }
+                else -> return
+            }
+            val repPort = ByteArray(2)
+            if (!readFully(upIn, repPort)) return
+
+            val fullRep = ByteArrayOutputStream()
+            fullRep.write(repHead)
+            fullRep.write(repAddr)
+            fullRep.write(repPort)
+            clientOut.write(fullRep.toByteArray())
+            clientOut.flush()
+
+            if (repHead[1] != 0x00.toByte()) return
+
+            VpnStateHolder.incrementPackets()
+            relayWithDpiBypass(clientIn, clientOut, upstream, applyKotlinSplit = false)
+        } catch (_: Exception) {
+            try {
+                clientOut.write(byteArrayOf(0x05, 0x05, 0x00, 0x01, 0, 0, 0, 0, 0, 0))
+                clientOut.flush()
+            } catch (_: Exception) {}
+        } finally {
+            try { upstream.close() } catch (_: Exception) {}
         }
     }
 
@@ -213,6 +304,7 @@ class DpiBypassProxy(
                     val dstPort = ((buf[offset].toInt() and 0xFF) shl 8) or (buf[offset + 1].toInt() and 0xFF)
                     offset += 2
 
+                    // Блокируем QUIC (UDP 443), чтобы YouTube мгновенно переключился на TCP
                     if (strategy.blockQuic && dstPort == 443) continue
 
                     val payloadLen = len - offset
@@ -261,15 +353,16 @@ class DpiBypassProxy(
     private suspend fun relayWithDpiBypass(
         clientIn: InputStream,
         clientOut: OutputStream,
-        remote: Socket
+        remote: Socket,
+        applyKotlinSplit: Boolean
     ) {
         val remoteOut = remote.getOutputStream()
         val remoteIn = remote.getInputStream()
         val strategy = VpnStateHolder.strategy.value
 
         val upJob = proxyScope.launch {
-            val buffer = ByteArray(32768)
-            var isFirstPacket = true
+            val buffer = ByteArray(65536)
+            var isFirstPacket = applyKotlinSplit
             try {
                 while (true) {
                     val bytesRead = clientIn.read(buffer)
@@ -289,7 +382,7 @@ class DpiBypassProxy(
         }
 
         val downJob = proxyScope.launch {
-            val buffer = ByteArray(32768)
+            val buffer = ByteArray(65536)
             try {
                 while (true) {
                     val bytesRead = remoteIn.read(buffer)

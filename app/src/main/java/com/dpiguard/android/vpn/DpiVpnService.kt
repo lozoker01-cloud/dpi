@@ -72,10 +72,11 @@ class DpiVpnService : VpnService() {
             }
 
             byeDpiRunner = ByeDpiRunner(this)
-            val nativeOk = byeDpiRunner?.start(10808, strategy) == true
-            if (!nativeOk) {
-                fallbackProxy = DpiBypassProxy(port = 10808).apply { start() }
-            }
+            val nativeOk = byeDpiRunner?.start(10810, strategy) == true
+            fallbackProxy = DpiBypassProxy(
+                port = 10808,
+                upstreamSocksPort = if (nativeOk) 10810 else null
+            ).apply { start() }
 
             val configFile = File(cacheDir, "hev-socks5-tunnel.yml")
             val configText = buildString {
@@ -87,7 +88,7 @@ class DpiVpnService : VpnService() {
                 appendLine("  udp: 'udp'")
                 appendLine("misc:")
                 appendLine("  task-stack-size: 81920")
-                appendLine("  tcp-buffer-size: 65536")
+                appendLine("  tcp-buffer-size: 131072")
                 appendLine("  tcp-read-write-timeout: 300000")
                 appendLine("  udp-read-write-timeout: 60000")
             }

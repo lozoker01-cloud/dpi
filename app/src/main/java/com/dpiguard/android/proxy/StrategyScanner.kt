@@ -31,7 +31,7 @@ object StrategyScanner {
     private val testHosts = listOf(
         "www.youtube.com",
         "i.ytimg.com",
-        "discord.com"
+        "redirector.googlevideo.com"
     )
 
     suspend fun scanAndSelectBest(context: Context): StrategyScanResult? = withContext(Dispatchers.IO) {
@@ -162,8 +162,19 @@ object StrategyScanner {
             val params = sslSocket.sslParameters
             params.serverNames = listOf(SNIHostName(host))
             sslSocket.sslParameters = params
-            sslSocket.soTimeout = 2500
+            sslSocket.soTimeout = 3000
             sslSocket.startHandshake()
+
+            // Отправляем лёгкий HTTP GET, чтобы проверить, не режет ли ТСПУ передачу данных после TLS
+            val out = sslSocket.outputStream
+            out.write("GET /generate_204 HTTP/1.1
+Host: $host
+Connection: close
+
+".toByteArray())
+            out.flush()
+            val firstRespByte = sslSocket.inputStream.read()
+            if (firstRespByte == -1) return null
 
             System.currentTimeMillis() - start
         } catch (e: Exception) {
