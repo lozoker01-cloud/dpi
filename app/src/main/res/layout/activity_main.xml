@@ -149,11 +149,25 @@
                     app:singleSelection="true">
 
                     <com.google.android.material.chip.Chip
-                        android:id="@+id/chipDnsCloudflare"
+                        android:id="@+id/chipDnsYandex"
                         style="@style/Widget.Material3.Chip.Filter"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:checked="true"
+                        android:text="Яндекс (77.88.8.8)" />
+
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/chipDnsAdGuard"
+                        style="@style/Widget.Material3.Chip.Filter"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="AdGuard (94.140.14.14)" />
+
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/chipDnsCloudflare"
+                        style="@style/Widget.Material3.Chip.Filter"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
                         android:text="1.1.1.1" />
 
                     <com.google.android.material.chip.Chip
@@ -162,13 +176,6 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="8.8.8.8" />
-
-                    <com.google.android.material.chip.Chip
-                        android:id="@+id/chipDnsQuad9"
-                        style="@style/Widget.Material3.Chip.Filter"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="9.9.9.9" />
                 </com.google.android.material.chip.ChipGroup>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>

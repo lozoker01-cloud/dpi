@@ -22,7 +22,7 @@ object VpnStateHolder {
     private val _strategy = MutableStateFlow(BypassStrategy.S01_FAKE_TTL8_TLSREC)
     val strategy: StateFlow<BypassStrategy> = _strategy.asStateFlow()
 
-    private val _dnsServer = MutableStateFlow("1.1.1.1")
+    private val _dnsServer = MutableStateFlow("77.88.8.8")
     val dnsServer: StateFlow<String> = _dnsServer.asStateFlow()
 
     private val _logs = MutableStateFlow<List<String>>(emptyList())

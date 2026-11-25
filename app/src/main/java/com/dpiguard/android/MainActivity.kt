@@ -92,9 +92,10 @@ class MainActivity : AppCompatActivity() {
     private fun setupDnsChips() {
         binding.chipGroupDns.setOnCheckedStateChangeListener { _, checkedIds ->
             when (checkedIds.firstOrNull()) {
+                R.id.chipDnsYandex -> VpnStateHolder.setDnsServer("77.88.8.8")
+                R.id.chipDnsAdGuard -> VpnStateHolder.setDnsServer("94.140.14.14")
                 R.id.chipDnsCloudflare -> VpnStateHolder.setDnsServer("1.1.1.1")
                 R.id.chipDnsGoogle -> VpnStateHolder.setDnsServer("8.8.8.8")
-                R.id.chipDnsQuad9 -> VpnStateHolder.setDnsServer("9.9.9.9")
             }
         }
     }
