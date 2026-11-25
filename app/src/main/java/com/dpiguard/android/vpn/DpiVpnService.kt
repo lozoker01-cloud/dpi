@@ -12,13 +12,12 @@ import androidx.core.app.NotificationCompat
 import com.dpiguard.android.MainActivity
 import com.dpiguard.android.R
 import com.dpiguard.android.proxy.DpiBypassProxy
+import hev.htproxy.TProxyService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
-import java.io.FileInputStream
+import java.io.File
 
 class DpiVpnService : VpnService() {
 
@@ -27,6 +26,7 @@ class DpiVpnService : VpnService() {
         const val ACTION_STOP = "com.dpiguard.android.STOP"
         private const val CHANNEL_ID = "dpi_guard_vpn"
         private const val NOTIFICATION_ID = 1001
+        private const val TUN_MTU = 8500
     }
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -58,14 +58,15 @@ class DpiVpnService : VpnService() {
             val dns = VpnStateHolder.dnsServer.value
             val builder = Builder()
                 .setSession("DPI Guard")
-                .setMtu(1500)
+                .setMtu(TUN_MTU)
                 .addAddress("10.0.0.2", 32)
                 .addRoute("0.0.0.0", 0)
                 .addDnsServer(dns)
                 .addDisallowedApplication(packageName)
 
             tunInterface = builder.establish()
-            if (tunInterface == null) {
+            val pfd = tunInterface
+            if (pfd == null) {
                 VpnStateHolder.log("Не удалось создать TUN-интерфейс")
                 stopVpn()
                 return
@@ -73,26 +74,35 @@ class DpiVpnService : VpnService() {
 
             proxy = DpiBypassProxy(port = 10808, scope = serviceScope).apply { start() }
 
-            // Точка интеграции нативного tun2socks (например, hev-socks5-tunnel):
-            // Передаём tunInterface.fd в нативный движок, указывая 127.0.0.1:10808 как SOCKS5-сервер.
-            // Пока читаем TUN-поток в корутине, чтобы интерфейс оставался активным.
-            val fd = tunInterface?.fileDescriptor
-            if (fd != null) {
-                serviceScope.launch {
-                    val input = FileInputStream(fd)
-                    val packet = ByteArray(32767)
-                    try {
-                        while (isActive) {
-                            val len = input.read(packet)
-                            if (len <= 0) break
-                        }
-                    } catch (_: Exception) {
-                    }
-                }
+            val configFile = File(cacheDir, "hev-socks5-tunnel.yml")
+            configFile.writeText(
+                "tunnel:
+" +
+                    "  mtu: $TUN_MTU
+" +
+                    "socks5:
+" +
+                    "  port: 10808
+" +
+                    "  address: 127.0.0.1
+" +
+                    "  udp: 'udp'
+" +
+                    "misc:
+" +
+                    "  task-stack-size: 81920
+"
+            )
+
+            val started = TProxyService.TProxyStartService(configFile.absolutePath, pfd.fd)
+            if (!started) {
+                VpnStateHolder.log("Ошибка запуска hev-socks5-tunnel")
+                stopVpn()
+                return
             }
 
             VpnStateHolder.setState(ConnectionState.CONNECTED)
-            VpnStateHolder.log("VPN-сервис активен (DNS: $dns)")
+            VpnStateHolder.log("Туннель активен (DNS: $dns)")
         } catch (e: Exception) {
             VpnStateHolder.log("Ошибка запуска VPN: ${e.message}")
             stopVpn()
@@ -100,6 +110,13 @@ class DpiVpnService : VpnService() {
     }
 
     private fun stopVpn() {
+        try {
+            if (TProxyService.TProxyIsRunning()) {
+                TProxyService.TProxyStopService()
+            }
+        } catch (_: Exception) {
+        }
+
         proxy?.stop()
         proxy = null
 
@@ -110,10 +127,15 @@ class DpiVpnService : VpnService() {
         tunInterface = null
 
         VpnStateHolder.setState(ConnectionState.DISCONNECTED)
-        VpnStateHolder.log("VPN-сервис остановлен")
+        VpnStateHolder.log("VPN остановлен")
 
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
+    }
+
+    override fun onRevoke() {
+        stopVpn()
+        super.onRevoke()
     }
 
     override fun onDestroy() {
@@ -129,7 +151,7 @@ class DpiVpnService : VpnService() {
                 "DPI Guard VPN",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Уведомление о работе локального обхода DPI"
+                description = "Локальный обход DPI"
             }
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(channel)
@@ -152,7 +174,7 @@ class DpiVpnService : VpnService() {
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("DPI Guard активен")
-            .setContentText("Локальный прокси: 127.0.0.1:10808")
+            .setContentText("Обход ТСПУ включён")
             .setSmallIcon(R.drawable.ic_shield)
             .setContentIntent(openIntent)
             .addAction(0, "Отключить", stopIntent)

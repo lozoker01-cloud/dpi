@@ -1,18 +1,13 @@
-# DPI Guard — Android DPI Bypass App
+# DPI Guard — Android DPI Bypass App (РФ / ТСПУ)
 
-Лёгкое Android-приложение на Kotlin для локального обхода DPI (без root-прав) через `VpnService` и встроенный локальный прокси с фрагментацией TLS ClientHello и HTTP-заголовков.
-
-> **Важно:** В проекте реализован полноценный локальный SOCKS5/HTTP-прокси (`127.0.0.1:10808`) с разбиением TLS ClientHello и HTTP Host, а также каркас `VpnService` с UI на Material 3 и сборочным пайплайном для GitHub Actions. Для прозрачного перехвата всего TCP/UDP-трафика в `VpnService` без настроек прокси в системе/браузере рекомендуется подключить нативный `hev-socks5-tunnel` в `DpiVpnService.kt` (комментарии с точкой интеграции оставлены в коде).
+Android-приложение на Kotlin для локального обхода DPI без root-прав через `VpnService`, нативный `hev-socks5-tunnel` (TUN -> SOCKS5 TCP+UDP) и встроенный прокси с обходом ТСПУ:
+- Разбиение **TLS ClientHello** по границе **SNI** (TLS Record Split + TCP-сегментация).
+- Опциональная блокировка **QUIC (UDP/443)**, чтобы YouTube, Chrome и Discord переключались на TCP/443.
+- Полноценный проброс **DNS (UDP/53)** через SOCKS5 `UDP ASSOCIATE` на выбранный DNS (`1.1.1.1` / `8.8.8.8` / `9.9.9.9`).
 
 ## Как собрать APK
 
-### Способ 1: Через GitHub Actions (без установки Android Studio)
-1. Создай новый репозиторий на GitHub и загрузи в него все файлы из этой папки.
-2. Перейди во вкладку **Actions** -> **Build Android APK** -> **Run workflow** (или просто сделай `git push` в ветку `main`).
-3. После завершения сборки скачай готовый `app-debug.apk` из раздела **Artifacts**.
-
-### Способ 2: Локально в Android Studio
-1. Открой папку `dpi-guard-android` в **Android Studio** (Ladybug / Koala или новее).
-2. Дождись синхронизации Gradle (потребуется JDK 17 и Android SDK 34).
-3. Нажми **Build -> Build Bundle(s) / APK(s) -> Build APK(s)**.
-4. Готовый файл появится в `app/build/outputs/apk/debug/app-debug.apk`.
+### Через GitHub Actions (проще всего)
+1. Загрузи все файлы в репозиторий на GitHub (убедись, что `.github/workflows/build-apk.yml` в корне).
+2. Во вкладке **Actions** выбери **Build Android APK** и нажми **Run workflow**.
+3. После зелёной галочки скачай `dpi-guard-debug-apk` из блока **Artifacts**.

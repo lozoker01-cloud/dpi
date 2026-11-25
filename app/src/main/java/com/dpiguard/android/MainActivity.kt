@@ -28,7 +28,7 @@ class MainActivity : AppCompatActivity() {
         if (result.resultCode == RESULT_OK) {
             startVpnService()
         } else {
-            VpnStateHolder.log("Пользователь отклонил разрешение на VPN")
+            VpnStateHolder.log("Разрешение на VPN не выдано")
         }
     }
 
@@ -148,7 +148,7 @@ class MainActivity : AppCompatActivity() {
                         binding.btnToggleVpn.text = "Остановить"
                     }
                     ConnectionState.CONNECTED -> {
-                        binding.tvStatus.text = "Активно • 127.0.0.1:10808"
+                        binding.tvStatus.text = "Активно • Обход ТСПУ"
                         binding.tvStatus.setTextColor(getColor(R.color.status_on))
                         binding.btnToggleVpn.text = "Отключить"
                     }
@@ -158,7 +158,7 @@ class MainActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             VpnStateHolder.packetsHandled.collect { count ->
-                binding.tvStats.text = "Обработано соединений: $count"
+                binding.tvStats.text = "Соединений через обход: $count"
             }
         }
 

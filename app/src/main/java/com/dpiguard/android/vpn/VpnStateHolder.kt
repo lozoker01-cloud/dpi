@@ -18,7 +18,7 @@ object VpnStateHolder {
     private val _state = MutableStateFlow(ConnectionState.DISCONNECTED)
     val state: StateFlow<ConnectionState> = _state.asStateFlow()
 
-    private val _strategy = MutableStateFlow(BypassStrategy.TLS_SPLIT_2)
+    private val _strategy = MutableStateFlow(BypassStrategy.RF_TSPU_DEFAULT)
     val strategy: StateFlow<BypassStrategy> = _strategy.asStateFlow()
 
     private val _dnsServer = MutableStateFlow("1.1.1.1")
@@ -38,12 +38,12 @@ object VpnStateHolder {
 
     fun setStrategy(strategy: BypassStrategy) {
         _strategy.value = strategy
-        log("Выбрана стратегия: ${strategy.title}")
+        log("Стратегия: ${strategy.title}")
     }
 
     fun setDnsServer(dns: String) {
         _dnsServer.value = dns
-        log("DNS изменён на $dns")
+        log("DNS: $dns")
     }
 
     fun incrementPackets() {
@@ -57,7 +57,7 @@ object VpnStateHolder {
     fun log(message: String) {
         val timestamp = timeFormat.format(Date())
         val entry = "[$timestamp] $message"
-        val updated = (_logs.value + entry).takeLast(60)
+        val updated = (_logs.value + entry).takeLast(80)
         _logs.value = updated
     }
 

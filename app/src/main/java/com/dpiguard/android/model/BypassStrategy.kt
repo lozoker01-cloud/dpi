@@ -3,29 +3,37 @@ package com.dpiguard.android.model
 enum class BypassStrategy(
     val title: String,
     val description: String,
+    val splitAtSni: Boolean,
+    val tlsRecordSplit: Boolean,
     val splitOffset: Int,
     val splitDelayMs: Long,
-    val disorderChunks: Boolean
+    val blockQuic: Boolean
 ) {
-    TLS_SPLIT_2(
-        title = "TLS Split (2 байта)",
-        description = "Делит TLS ClientHello на 2-м байте — базовый режим для большинства провайдеров",
+    RF_TSPU_DEFAULT(
+        title = "РФ (ТСПУ): YouTube + Discord",
+        description = "Режет TLS Record пополам внутри SNI + блокирует QUIC (UDP/443) для перехода на TCP",
+        splitAtSni = true,
+        tlsRecordSplit = true,
         splitOffset = 2,
-        splitDelayMs = 5L,
-        disorderChunks = false
-    ),
-    TLS_SPLIT_SNI(
-        title = "TLS Split + Пауза",
-        description = "Делит первый пакет пополам с задержкой 15 мс",
-        splitOffset = 1,
-        splitDelayMs = 15L,
-        disorderChunks = true
-    ),
-    HTTP_AND_TLS(
-        title = "HTTP Host + TLS",
-        description = "Фрагментация и TLS ClientHello, и HTTP-запросов",
-        splitOffset = 3,
         splitDelayMs = 8L,
-        disorderChunks = false
+        blockQuic = true
+    ),
+    RF_SOFT_SPLIT(
+        title = "РФ: Мягкий TLS Split (1 байт)",
+        description = "Делит первый TCP-пакет на 1-м байте + TLS Record Split без блокировки QUIC",
+        splitAtSni = false,
+        tlsRecordSplit = true,
+        splitOffset = 1,
+        splitDelayMs = 10L,
+        blockQuic = false
+    ),
+    TLS_TCP_SEGMENTS(
+        title = "TCP-сегментация (2 байта)",
+        description = "Классическое деление первого TCP-сегмента на 2-м байте и середине SNI",
+        splitAtSni = true,
+        tlsRecordSplit = false,
+        splitOffset = 2,
+        splitDelayMs = 12L,
+        blockQuic = true
     )
 }
