@@ -11,6 +11,7 @@ import android.os.ParcelFileDescriptor
 import androidx.core.app.NotificationCompat
 import com.dpiguard.android.MainActivity
 import com.dpiguard.android.R
+import com.dpiguard.android.proxy.ByeDpiRunner
 import com.dpiguard.android.proxy.DpiBypassProxy
 import hev.htproxy.TProxyService
 import java.io.File
@@ -26,7 +27,8 @@ class DpiVpnService : VpnService() {
     }
 
     private var tunInterface: ParcelFileDescriptor? = null
-    private var proxy: DpiBypassProxy? = null
+    private var byeDpiRunner: ByeDpiRunner? = null
+    private var fallbackProxy: DpiBypassProxy? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         return when (intent?.action) {
@@ -51,6 +53,8 @@ class DpiVpnService : VpnService() {
 
         try {
             val dns = VpnStateHolder.dnsServer.value
+            val strategy = VpnStateHolder.strategy.value
+
             val builder = Builder()
                 .setSession("DPI Guard")
                 .setMtu(TUN_MTU)
@@ -67,7 +71,11 @@ class DpiVpnService : VpnService() {
                 return
             }
 
-            proxy = DpiBypassProxy(port = 10808).apply { start() }
+            byeDpiRunner = ByeDpiRunner(this)
+            val nativeOk = byeDpiRunner?.start(10808, strategy) == true
+            if (!nativeOk) {
+                fallbackProxy = DpiBypassProxy(port = 10808).apply { start() }
+            }
 
             val configFile = File(cacheDir, "hev-socks5-tunnel.yml")
             val configText = buildString {
@@ -93,7 +101,7 @@ class DpiVpnService : VpnService() {
             }
 
             VpnStateHolder.setState(ConnectionState.CONNECTED)
-            VpnStateHolder.log("Туннель активен (DNS: $dns)")
+            VpnStateHolder.log("Туннель активен (DNS: $dns, движок: ${if (nativeOk) "ByeDPI" else "Kotlin"})")
         } catch (t: Throwable) {
             VpnStateHolder.log("Ошибка запуска VPN: ${t.message}")
             stopVpn()
@@ -105,19 +113,15 @@ class DpiVpnService : VpnService() {
             if (TProxyService.TProxyIsRunning()) {
                 TProxyService.TProxyStopService()
             }
-        } catch (_: Throwable) {
-        }
+        } catch (_: Throwable) {}
 
-        try {
-            proxy?.stop()
-        } catch (_: Throwable) {
-        }
-        proxy = null
+        try { byeDpiRunner?.stop() } catch (_: Throwable) {}
+        byeDpiRunner = null
 
-        try {
-            tunInterface?.close()
-        } catch (_: Throwable) {
-        }
+        try { fallbackProxy?.stop() } catch (_: Throwable) {}
+        fallbackProxy = null
+
+        try { tunInterface?.close() } catch (_: Throwable) {}
         tunInterface = null
 
         VpnStateHolder.setState(ConnectionState.DISCONNECTED)

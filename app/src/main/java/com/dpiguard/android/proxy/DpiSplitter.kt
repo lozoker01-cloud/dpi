@@ -42,16 +42,15 @@ object DpiSplitter {
                     } else {
                         (recordLen / 2).coerceIn(2, recordLen - 1)
                     }
-                    // 3 валидных TLS-рекорда: 1 байт, до середины SNI, остаток
                     writeTlsRecord(out, data[1], data[2], data, 5, 1)
                     if (strategy.splitDelayMs > 0) delay(strategy.splitDelayMs)
                     writeTlsRecord(out, data[1], data[2], data, 6, midPayload - 1)
                     if (strategy.splitDelayMs > 0) delay(strategy.splitDelayMs)
                     writeTlsRecord(out, data[1], data[2], data, 5 + midPayload, recordLen - midPayload)
-                    return "TLS 3-Record (1+${midPayload - 1}+${recordLen - midPayload})"
+                    return "TLS 3-Record"
                 } else {
                     sendTcpMicroChunks(out, data, length, sniRange, strategy.splitDelayMs)
-                    return "TCP-чанки (большой ClientHello)"
+                    return "TCP-чанки"
                 }
             }
 
@@ -65,11 +64,11 @@ object DpiSplitter {
                     writeTlsRecord(out, data[1], data[2], data, 5, splitPayload)
                     if (strategy.splitDelayMs > 0) delay(strategy.splitDelayMs)
                     writeTlsRecord(out, data[1], data[2], data, 5 + splitPayload, recordLen - splitPayload)
-                    return "TLS 2-Record ($splitPayload+${recordLen - splitPayload})"
+                    return "TLS 2-Record"
                 } else {
                     val splitAt = (sniRange?.let { (it.first + it.second) / 2 } ?: 7).coerceIn(1, length - 1)
                     sendTwoTcpSegments(out, data, length, splitAt, strategy.splitDelayMs)
-                    return "TCP SNI Split ($splitAt B)"
+                    return "TCP SNI Split"
                 }
             }
 
@@ -86,7 +85,7 @@ object DpiSplitter {
             SplitMode.TCP_SNI_MID -> {
                 val splitAt = (sniRange?.let { (it.first + it.second) / 2 } ?: 7).coerceIn(1, length - 1)
                 sendTwoTcpSegments(out, data, length, splitAt, strategy.splitDelayMs)
-                return "TCP SNI Mid ($splitAt B)"
+                return "TCP SNI Mid"
             }
 
             SplitMode.DIRECT_QUIC_BLOCK -> {

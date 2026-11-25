@@ -1,13 +1,20 @@
 package com.dpiguard.android.proxy
 
+import android.content.Context
 import com.dpiguard.android.model.BypassStrategy
 import com.dpiguard.android.vpn.VpnStateHolder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.ByteArrayOutputStream
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.InetAddress
 import java.net.InetSocketAddress
+import java.net.Proxy
 import java.net.Socket
-import java.security.SecureRandom
+import java.net.URL
+import javax.net.ssl.SNIHostName
+import javax.net.ssl.SSLSocket
+import javax.net.ssl.SSLSocketFactory
 
 data class StrategyScanResult(
     val strategy: BypassStrategy,
@@ -24,30 +31,60 @@ object StrategyScanner {
         "discord.com"
     )
 
-    suspend fun scanAndSelectBest(): StrategyScanResult? = withContext(Dispatchers.IO) {
+    suspend fun scanAndSelectBest(context: Context): StrategyScanResult? = withContext(Dispatchers.IO) {
         VpnStateHolder.setScanning(true)
         VpnStateHolder.log("=== Запуск автоподбора стратегии ===")
         val results = mutableListOf<StrategyScanResult>()
+        val runner = ByeDpiRunner(context)
+        val hasNative = runner.isBinaryAvailable()
+        VpnStateHolder.log(if (hasNative) "Режим теста: нативный ByeDPI" else "Режим теста: Kotlin fallback (нет libbyedpi.so)")
 
         try {
+            val resolvedIps = mutableMapOf<String, String>()
+            for (host in testHosts) {
+                val ip = resolveHostClean(host)
+                if (ip != null) {
+                    resolvedIps[host] = ip
+                } else {
+                    VpnStateHolder.log("DNS ошибка для $host")
+                }
+            }
+
+            if (resolvedIps.isEmpty()) {
+                VpnStateHolder.setScanStatus("Нет доступа к DNS — проверь интернет")
+                return@withContext null
+            }
+
             val strategies = BypassStrategy.entries
             for ((index, strategy) in strategies.withIndex()) {
                 VpnStateHolder.setScanStatus("Проверка ${index + 1}/${strategies.size}: ${strategy.title}...")
                 var passed = 0
                 var totalTime = 0L
 
-                for (host in testHosts) {
-                    val rtt = testHostWithStrategy(host, strategy)
-                    if (rtt != null) {
-                        passed++
-                        totalTime += rtt
+                val testPort = 10809
+                var fallbackProxy: DpiBypassProxy? = null
+                val nativeStarted = if (hasNative) runner.start(testPort, strategy) else false
+                if (!nativeStarted) {
+                    fallbackProxy = DpiBypassProxy(port = testPort).apply { start() }
+                }
+
+                try {
+                    for ((host, ip) in resolvedIps) {
+                        val rtt = testHostViaSocks(host, ip, testPort)
+                        if (rtt != null) {
+                            passed++
+                            totalTime += rtt
+                        }
                     }
+                } finally {
+                    if (nativeStarted) runner.stop()
+                    fallbackProxy?.stop()
                 }
 
                 val avgMs = if (passed > 0) totalTime / passed else 9999L
-                val result = StrategyScanResult(strategy, passed, testHosts.size, avgMs)
+                val result = StrategyScanResult(strategy, passed, resolvedIps.size, avgMs)
                 results.add(result)
-                VpnStateHolder.log("Тест [${strategy.title}]: $passed/${testHosts.size} (${avgMs} мс)")
+                VpnStateHolder.log("[${index + 1}/${strategies.size}] ${strategy.title}: $passed/${resolvedIps.size} (${avgMs} мс)")
             }
 
             val best = results.sortedWith(
@@ -57,12 +94,12 @@ object StrategyScanner {
 
             if (best != null && best.passed > 0) {
                 VpnStateHolder.setStrategy(best.strategy)
-                val summary = "Выбрана: ${best.strategy.title} (${best.passed}/${best.total}, ${best.avgLatencyMs} мс)"
+                val summary = "Лучшая: ${best.strategy.title} (${best.passed}/${best.total}, ${best.avgLatencyMs} мс)"
                 VpnStateHolder.setScanStatus(summary)
-                VpnStateHolder.log("Итог автоподбора -> $summary")
+                VpnStateHolder.log("Итог -> $summary")
             } else {
-                VpnStateHolder.setScanStatus("Не удалось пройти рукопожатие — проверь интернет")
-                VpnStateHolder.log("Автоподбор не нашёл рабочего ответа от серверов")
+                VpnStateHolder.setScanStatus("0/${resolvedIps.size} — см. причину в журнале ниже")
+                VpnStateHolder.log("Автоподбор: ни одна стратегия не прошла проверку")
             }
 
             best
@@ -71,85 +108,61 @@ object StrategyScanner {
         }
     }
 
-    private suspend fun testHostWithStrategy(host: String, strategy: BypassStrategy): Long? {
-        val socket = Socket()
-        return try {
-            val start = System.currentTimeMillis()
-            socket.tcpNoDelay = true
-            socket.soTimeout = 2500
-            socket.connect(InetSocketAddress(host, 443), 2500)
-
-            val clientHello = buildTlsClientHello(host)
-            val out = socket.getOutputStream()
-            DpiSplitter.sendWithStrategy(out, clientHello, clientHello.size, strategy)
-
-            val inp = socket.getInputStream()
-            val firstByte = inp.read()
-            val secondByte = inp.read()
-            if (firstByte == 0x16 && secondByte == 0x03) {
-                System.currentTimeMillis() - start
-            } else {
-                null
+    private fun resolveHostClean(host: String): String? {
+        try {
+            val url = URL("https://dns.google/resolve?name=$host&type=A")
+            val conn = (url.openConnection() as HttpURLConnection).apply {
+                connectTimeout = 2500
+                readTimeout = 2500
+            }
+            if (conn.responseCode == 200) {
+                val json = JSONObject(conn.inputStream.bufferedReader().readText())
+                val answers = json.optJSONArray("Answer")
+                if (answers != null) {
+                    for (i in 0 until answers.length()) {
+                        val obj = answers.getJSONObject(i)
+                        if (obj.optInt("type") == 1) {
+                            return obj.optString("data")
+                        }
+                    }
+                }
             }
         } catch (_: Exception) {
+        }
+
+        return try {
+            InetAddress.getByName(host).hostAddress
+        } catch (_: Exception) {
             null
-        } finally {
-            try {
-                socket.close()
-            } catch (_: Exception) {
-            }
         }
     }
 
-    private fun buildTlsClientHello(host: String): ByteArray {
-        val hostBytes = host.toByteArray(Charsets.US_ASCII)
-        val sniEntryLen = 3 + hostBytes.size
-        val sniListLen = sniEntryLen
-        val sniExtPayloadLen = 2 + sniListLen
-        val sniExtTotalLen = 4 + sniExtPayloadLen
+    private fun testHostViaSocks(host: String, ip: String, socksPort: Int): Long? {
+        var socksSocket: Socket? = null
+        var sslSocket: SSLSocket? = null
+        return try {
+            val start = System.currentTimeMillis()
+            val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", socksPort))
+            socksSocket = Socket(proxy)
+            socksSocket.soTimeout = 4000
+            socksSocket.connect(InetSocketAddress(ip, 443), 4000)
 
-        val body = ByteArrayOutputStream()
-        // Legacy version TLS 1.2 (0x0303)
-        body.write(byteArrayOf(0x03, 0x03))
-        // Random 32 bytes
-        val random = ByteArray(32)
-        SecureRandom().nextBytes(random)
-        body.write(random)
-        // Session ID length = 0
-        body.write(0x00)
-        // Cipher Suites (2 bytes length + 2 suites)
-        body.write(byteArrayOf(0x00, 0x04, 0x13, 0x01, 0xC0.toByte(), 0x2F))
-        // Compression methods (1 byte length = 1, null = 0)
-        body.write(byteArrayOf(0x01, 0x00))
-        // Extensions total length
-        body.write((sniExtTotalLen shr 8) and 0xFF)
-        body.write(sniExtTotalLen and 0xFF)
-        // SNI extension (0x0000)
-        body.write(byteArrayOf(0x00, 0x00))
-        body.write((sniExtPayloadLen shr 8) and 0xFF)
-        body.write(sniExtPayloadLen and 0xFF)
-        body.write((sniListLen shr 8) and 0xFF)
-        body.write(sniListLen and 0xFF)
-        body.write(0x00) // host_name
-        body.write((hostBytes.size shr 8) and 0xFF)
-        body.write(hostBytes.size and 0xFF)
-        body.write(hostBytes)
+            val factory = SSLSocketFactory.getDefault() as SSLSocketFactory
+            sslSocket = factory.createSocket(socksSocket, host, 443, true) as SSLSocket
+            val params = sslSocket.sslParameters
+            params.serverNames = listOf(SNIHostName(host))
+            sslSocket.sslParameters = params
+            sslSocket.soTimeout = 4000
+            sslSocket.startHandshake()
 
-        val hsBody = body.toByteArray()
-        val hsLen = hsBody.size
-        val recLen = 4 + hsLen
-
-        val packet = ByteArrayOutputStream()
-        // TLS Record Header
-        packet.write(byteArrayOf(0x16, 0x03, 0x01))
-        packet.write((recLen shr 8) and 0xFF)
-        packet.write(recLen and 0xFF)
-        // Handshake ClientHello (0x01) + 3-byte length
-        packet.write(0x01)
-        packet.write((hsLen shr 16) and 0xFF)
-        packet.write((hsLen shr 8) and 0xFF)
-        packet.write(hsLen and 0xFF)
-        packet.write(hsBody)
-        return packet.toByteArray()
+            System.currentTimeMillis() - start
+        } catch (e: Exception) {
+            val msg = e.message ?: e.javaClass.simpleName
+            VpnStateHolder.log("  [$host] отказ: $msg")
+            null
+        } finally {
+            try { sslSocket?.close() } catch (_: Exception) {}
+            try { socksSocket?.close() } catch (_: Exception) {}
+        }
     }
 }

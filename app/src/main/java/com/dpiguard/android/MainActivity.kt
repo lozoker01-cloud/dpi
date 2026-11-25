@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
+import android.view.View
 import android.widget.ArrayAdapter
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -72,7 +73,7 @@ class MainActivity : AppCompatActivity() {
         binding.spinnerStrategy.setOnItemSelectedListener(object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(
                 parent: android.widget.AdapterView<*>?,
-                view: android.view.View?,
+                view: View?,
                 position: Int,
                 id: Long
             ) {
@@ -109,7 +110,7 @@ class MainActivity : AppCompatActivity() {
         binding.btnAutoScan.setOnClickListener {
             if (!VpnStateHolder.isScanning.value) {
                 lifecycleScope.launch {
-                    StrategyScanner.scanAndSelectBest()
+                    StrategyScanner.scanAndSelectBest(applicationContext)
                 }
             }
         }
@@ -206,6 +207,9 @@ class MainActivity : AppCompatActivity() {
                     "Логи появятся после запуска..."
                 } else {
                     entries.joinToString("\n")
+                }
+                binding.scrollViewMain.post {
+                    binding.scrollViewMain.fullScroll(View.FOCUS_DOWN)
                 }
             }
         }

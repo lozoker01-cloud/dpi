@@ -19,7 +19,7 @@ object VpnStateHolder {
     private val _state = MutableStateFlow(ConnectionState.DISCONNECTED)
     val state: StateFlow<ConnectionState> = _state.asStateFlow()
 
-    private val _strategy = MutableStateFlow(BypassStrategy.RF_TRIPLE_RECORD)
+    private val _strategy = MutableStateFlow(BypassStrategy.RF_DISORDER_OOB)
     val strategy: StateFlow<BypassStrategy> = _strategy.asStateFlow()
 
     private val _dnsServer = MutableStateFlow("1.1.1.1")
@@ -76,7 +76,7 @@ object VpnStateHolder {
         val timestamp = timeFormat.format(Date())
         val entry = "[$timestamp] $message"
         synchronized(logLock) {
-            _logs.value = (_logs.value + entry).takeLast(80)
+            _logs.value = (_logs.value + entry).takeLast(120)
         }
     }
 

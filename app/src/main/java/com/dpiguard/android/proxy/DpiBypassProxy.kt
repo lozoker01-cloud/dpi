@@ -18,10 +18,10 @@ import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketAddress
+import java.util.concurrent.atomic.AtomicReference
 
 /**
- * Локальный SOCKS5 (TCP CONNECT + UDP ASSOCIATE) прокси с обходом DPI (ТСПУ).
- * Слушает на 127.0.0.1:10808.
+ * Резервный локальный SOCKS5-прокси на Kotlin (используется, если нативный libbyedpi.so недоступен).
  */
 class DpiBypassProxy(
     private val port: Int = 10808
@@ -36,7 +36,7 @@ class DpiBypassProxy(
         acceptJob = proxyScope.launch {
             try {
                 serverSocket = ServerSocket(port, 256, InetAddress.getByName("127.0.0.1"))
-                VpnStateHolder.log("Прокси запущен: 127.0.0.1:$port")
+                VpnStateHolder.log("Kotlin-прокси запущен: 127.0.0.1:$port")
 
                 while (isActive) {
                     val client = serverSocket?.accept() ?: break
@@ -55,13 +55,9 @@ class DpiBypassProxy(
     fun stop() {
         acceptJob?.cancel()
         acceptJob = null
-        try {
-            serverSocket?.close()
-        } catch (_: Exception) {
-        }
+        try { serverSocket?.close() } catch (_: Exception) {}
         serverSocket = null
         proxyScope.cancel()
-        VpnStateHolder.log("Прокси остановлен")
     }
 
     private suspend fun handleClient(client: Socket) {
@@ -142,18 +138,14 @@ class DpiBypassProxy(
             output.flush()
 
             VpnStateHolder.incrementPackets()
-            relayWithDpiBypass(input, output, remote, targetHost, targetPort)
+            relayWithDpiBypass(input, output, remote)
         } catch (_: Exception) {
             try {
                 output.write(byteArrayOf(0x05, 0x05, 0x00, 0x01, 0, 0, 0, 0, 0, 0))
                 output.flush()
-            } catch (_: Exception) {
-            }
+            } catch (_: Exception) {}
         } finally {
-            try {
-                remote.close()
-            } catch (_: Exception) {
-            }
+            try { remote.close() } catch (_: Exception) {}
         }
     }
 
@@ -179,7 +171,7 @@ class DpiBypassProxy(
             )
             tcpOutput.flush()
 
-            val clientUdpAddr = java.util.concurrent.atomic.AtomicReference<SocketAddress?>(null)
+            val clientUdpAddr = AtomicReference<SocketAddress?>(null)
             val strategy = VpnStateHolder.strategy.value
 
             val clientToRemote = proxyScope.launch {
@@ -221,9 +213,7 @@ class DpiBypassProxy(
                     val dstPort = ((buf[offset].toInt() and 0xFF) shl 8) or (buf[offset + 1].toInt() and 0xFF)
                     offset += 2
 
-                    if (strategy.blockQuic && dstPort == 443) {
-                        continue
-                    }
+                    if (strategy.blockQuic && dstPort == 443) continue
 
                     val payloadLen = len - offset
                     if (payloadLen <= 0) continue
@@ -258,7 +248,6 @@ class DpiBypassProxy(
 
             val tmp = ByteArray(64)
             while (tcpInput.read(tmp) != -1) {
-                // Ждём закрытия управляющего соединения
             }
             clientToRemote.cancel()
             remoteToClient.cancel()
@@ -272,9 +261,7 @@ class DpiBypassProxy(
     private suspend fun relayWithDpiBypass(
         clientIn: InputStream,
         clientOut: OutputStream,
-        remote: Socket,
-        targetHost: String,
-        targetPort: Int
+        remote: Socket
     ) {
         val remoteOut = remote.getOutputStream()
         val remoteIn = remote.getInputStream()
@@ -290,20 +277,15 @@ class DpiBypassProxy(
                         try { remote.shutdownOutput() } catch (_: Exception) {}
                         break
                     }
-
                     if (isFirstPacket) {
                         isFirstPacket = false
-                        val splitLog = DpiSplitter.sendWithStrategy(remoteOut, buffer, bytesRead, strategy)
-                        if (splitLog != null && targetPort == 443) {
-                            VpnStateHolder.log("$splitLog -> $targetHost")
-                        }
+                        DpiSplitter.sendWithStrategy(remoteOut, buffer, bytesRead, strategy)
                     } else {
                         remoteOut.write(buffer, 0, bytesRead)
                         remoteOut.flush()
                     }
                 }
-            } catch (_: Exception) {
-            }
+            } catch (_: Exception) {}
         }
 
         val downJob = proxyScope.launch {
@@ -315,11 +297,9 @@ class DpiBypassProxy(
                     clientOut.write(buffer, 0, bytesRead)
                     clientOut.flush()
                 }
-            } catch (_: Exception) {
-            }
+            } catch (_: Exception) {}
         }
 
-        // Важно: ждём оба потока, чтобы видеопотоки не обрывались при half-close клиента
         upJob.join()
         downJob.join()
     }

@@ -1,61 +1,68 @@
 package com.dpiguard.android.model
 
 enum class SplitMode {
-    TLS_RECORD_SNI,       // 2 TLS-рекорда по середине SNI
-    TLS_TRIPLE_RECORD,    // 3 TLS-рекорда: 1 байт + до середины SNI + остаток
-    TCP_FIRST_BYTE,       // 1-й байт отдельно + остаток
-    TCP_MICRO_CHUNKS,     // Нарезка заголовка и SNI по 2 байта
-    TCP_SNI_MID,          // 2 TCP-сегмента по середине SNI
-    DIRECT_QUIC_BLOCK     // Без резки TCP, только блок QUIC + чистый DNS
+    TLS_RECORD_SNI,
+    TLS_TRIPLE_RECORD,
+    TCP_FIRST_BYTE,
+    TCP_MICRO_CHUNKS,
+    TCP_SNI_MID,
+    DIRECT_QUIC_BLOCK
 }
 
 enum class BypassStrategy(
     val title: String,
     val description: String,
+    val byedpiArgs: List<String>,
     val mode: SplitMode,
     val splitDelayMs: Long,
     val blockQuic: Boolean
 ) {
-    RF_TRIPLE_RECORD(
-        title = "РФ: Тройной TLS Split + блок QUIC",
-        description = "Делит ClientHello на 3 TLS-рекорда (1B + SNI + остаток) — лучший режим для ТСПУ и видео",
+    RF_DISORDER_OOB(
+        title = "РФ: Disorder + OOB + TLSRec (Топ для ТСПУ)",
+        description = "Комбинация --oob 1+s --disorder 3+s --tlsrec 1+s + --auto=torst",
+        byedpiArgs = listOf("--oob", "1+s", "--disorder", "3+s", "--tlsrec", "1+s", "--udp-fake", "1", "--auto=torst", "--timeout", "3", "--split", "1"),
         mode = SplitMode.TLS_TRIPLE_RECORD,
         splitDelayMs = 6L,
         blockQuic = true
     ),
-    RF_RECORD_SNI(
-        title = "РФ: TLS Record Split (SNI) + блок QUIC",
-        description = "Режет TLS-запись на 2 части ровно внутри домена SNI и отключает QUIC",
+    RF_FAKE_TTL8(
+        title = "РФ: Fake TLS (TTL 8) + TLSRec",
+        description = "Отправляет фейковый ClientHello с TTL=8 и режет запись по SNI",
+        byedpiArgs = listOf("--fake", "-1", "--ttl", "8", "--fake-tls-mod", "rand", "--tlsrec", "1+s", "--udp-fake", "1"),
         mode = SplitMode.TLS_RECORD_SNI,
         splitDelayMs = 8L,
         blockQuic = true
     ),
-    RF_MICRO_CHUNKS(
-        title = "РФ: Микро-чанки по 2 байта + блок QUIC",
-        description = "Отправляет заголовок и SNI маленькими TCP-пакетами по 2 байта",
+    RF_FAKE_TTL5_DISORDER(
+        title = "РФ: Fake TLS (TTL 5) + Disorder",
+        description = "Агрессивный режим с TTL=5 и обратным порядком пакетов",
+        byedpiArgs = listOf("--disorder", "1", "--fake", "-1", "--ttl", "5", "--fake-tls-mod", "rand", "--udp-fake", "2"),
         mode = SplitMode.TCP_MICRO_CHUNKS,
-        splitDelayMs = 2L,
+        splitDelayMs = 3L,
         blockQuic = true
     ),
-    RF_FIRST_BYTE(
-        title = "РФ: Сплит на 1-м байте + блок QUIC",
-        description = "Классический 1-байтовый TCP-сплит первого пакета",
+    RF_DISOOB_SNI(
+        title = "РФ: DisOOB + Split по SNI",
+        description = "Обратная отправка с OOB-байтом внутри домена SNI",
+        byedpiArgs = listOf("--disoob", "1+s", "--split", "1", "--tlsrec", "3+s", "--udp-fake", "1"),
         mode = SplitMode.TCP_FIRST_BYTE,
-        splitDelayMs = 10L,
+        splitDelayMs = 8L,
         blockQuic = true
     ),
-    RF_SOFT_NO_QUIC(
-        title = "Мягкий: TLS Split (без блока QUIC)",
-        description = "Режет TCP по середине SNI, но оставляет UDP/443 (для звонков и игр)",
+    RF_AUTO_MULTI(
+        title = "РФ: Авто-перебор групп (Torst)",
+        description = "Начинает с TLSRec+Disorder, при сбросе переключается на OOB+Fake",
+        byedpiArgs = listOf("--disorder", "1", "--tlsrec", "1+s", "--auto=torst", "--timeout", "2", "--oob", "1+s", "--fake", "-1", "--ttl", "7"),
+        mode = SplitMode.TLS_TRIPLE_RECORD,
+        splitDelayMs = 6L,
+        blockQuic = true
+    ),
+    RF_SPLIT_SOFT(
+        title = "РФ: Мягкий Split + HttpMod",
+        description = "Без OOB и Fake, только TLSRec + модификация HTTP Host",
+        byedpiArgs = listOf("--split", "1+s", "--tlsrec", "1+s", "--mod-http", "h,d"),
         mode = SplitMode.TCP_SNI_MID,
         splitDelayMs = 8L,
         blockQuic = false
-    ),
-    RF_QUIC_ONLY(
-        title = "Только блок QUIC + DNS",
-        description = "Не режет TCP, только переводит YouTube/Chrome с QUIC на TCP и меняет DNS",
-        mode = SplitMode.DIRECT_QUIC_BLOCK,
-        splitDelayMs = 0L,
-        blockQuic = true
     )
 }
