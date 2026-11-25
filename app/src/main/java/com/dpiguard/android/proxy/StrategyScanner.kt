@@ -66,6 +66,7 @@ object StrategyScanner {
                 val nativeStarted = if (hasNative) runner.start(testPort, strategy) else false
                 if (!nativeStarted) {
                     fallbackProxy = DpiBypassProxy(port = testPort).apply { start() }
+                    kotlinx.coroutines.delay(150)
                 }
 
                 try {

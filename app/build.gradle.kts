@@ -60,6 +60,45 @@ if (!hevAar.exists()) {
     }
 }
 
+val byedpiArm64 = file("src/main/jniLibs/arm64-v8a/libbyedpi.so")
+if (!byedpiArm64.exists()) {
+    val ndkRoot = listOfNotNull(
+        System.getenv("ANDROID_NDK_HOME"),
+        System.getenv("ANDROID_HOME")?.let { "$it/ndk" },
+        "/usr/local/lib/android/sdk/ndk"
+    ).map { file(it) }.firstOrNull { it.exists() }
+
+    val clangArm64 = ndkRoot?.walkTopDown()?.firstOrNull { it.name == "aarch64-linux-android29-clang" }
+    val clangArm32 = ndkRoot?.walkTopDown()?.firstOrNull { it.name == "armv7a-linux-androideabi29-clang" }
+
+    if (clangArm64 != null && clangArm32 != null) {
+        val tmpDir = file("${layout.buildDirectory.get().asFile}/byedpi-src")
+        if (tmpDir.exists()) tmpDir.deleteRecursively()
+        exec {
+            commandLine("git", "clone", "--depth", "1", "https://github.com/hufrea/byedpi.git", tmpDir.absolutePath)
+        }
+        val srcs = listOf("main.c", "proxy.c", "desync.c", "conev.c", "extend.c", "mpool.c", "packets.c")
+            .map { file("${tmpDir.absolutePath}/$it").absolutePath }
+
+        byedpiArm64.parentFile.mkdirs()
+        exec {
+            commandLine(
+                listOf(clangArm64.absolutePath, "-O2", "-fPIE", "-pie", "-pthread", "-D_GNU_SOURCE", "-Wl,-z,max-page-size=16384") +
+                    srcs + listOf("-o", byedpiArm64.absolutePath)
+            )
+        }
+
+        val byedpiArm32 = file("src/main/jniLibs/armeabi-v7a/libbyedpi.so")
+        byedpiArm32.parentFile.mkdirs()
+        exec {
+            commandLine(
+                listOf(clangArm32.absolutePath, "-O2", "-fPIE", "-pie", "-pthread", "-D_GNU_SOURCE") +
+                    srcs + listOf("-o", byedpiArm32.absolutePath)
+            )
+        }
+    }
+}
+
 dependencies {
     implementation(files("libs/hev-socks5-tunnel.aar"))
     implementation("androidx.core:core-ktx:1.13.1")
